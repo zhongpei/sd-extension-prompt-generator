@@ -495,7 +495,7 @@ def on_before_component(component: gr.component, **kwargs: dict):
             ui_prompts.append(component)
         elif kwargs['elem_id'] == 'paste':
             with gr.Blocks(analytics_enabled=False) as ui_component:
-                button = gr.Button(value='🪄', elem_classes='tool', elem_id='format')
+                button = gr.Button(value='F', elem_classes='tool', elem_id='format')
                 button.click(
                     fn=format_prompt,
                     inputs=ui_prompts,

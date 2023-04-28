@@ -4,10 +4,10 @@ from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from typing import List
 import gradio as gr
 import random
-from huggingface_hub import snapshot_download, hf_hub_download
-from modules import script_callbacks
-from modules import scripts
+from huggingface_hub import hf_hub_download
+
 import re
+from modules import scripts, script_callbacks, shared
 
 ui_prompts = []
 
@@ -185,8 +185,9 @@ class Model(object):
 def gen_prompt(prompt):
     global model
     if model is None:
+        model_id = shared.opts.prompt_generator_zh_model_id
         model = Model()
-        model.init_model()
+        model.init_model(model_id=model_id)
 
     if not prompt or prompt.strip() == '':
         return prompt
@@ -212,6 +213,22 @@ def on_before_component(component: gr.component, **kwargs: dict):
                 return ui_component
 
 
+SETTINGS_SECTION = ("prompt_generator_zh", "prompt generator ")
+
+
+def on_ui_settings():
+    model_ids = list(MODEL_NAME.keys())
+    shared.opts.add_option(
+        "prompt_generator_zh_model_id",
+        shared.OptionInfo(
+            model_ids[0], "model type (requires reload UI)", gr.Radio,
+            lambda: {"choices": model_ids},
+            section=SETTINGS_SECTION
+        )
+    )
+
+
+script_callbacks.on_ui_settings(on_ui_settings)
 script_callbacks.on_before_component(on_before_component)
 
 if __name__ == "__main__":
