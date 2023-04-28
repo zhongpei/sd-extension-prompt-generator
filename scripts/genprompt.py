@@ -182,16 +182,24 @@ class Model(object):
         return prompt_output
 
 
-def gen_prompt(prompt):
+def init_model():
     global model
+    model_id = shared.opts.prompt_generator_zh_model_id
     if model is None:
-        model_id = shared.opts.prompt_generator_zh_model_id
         model = Model()
         model.init_model(model_id=model_id)
+    elif model.model_id != model_id:
+        model.reset_model()
+        model.init_model(model_id=model_id)
 
-    if not prompt or prompt.strip() == '':
+
+def gen_prompt(prompt):
+    global model
+    init_model()
+
+    if not prompt or len(prompt.strip()) == 0:
         return prompt
-
+    prompt = prompt.strip()
     ret = model.gen_prompt(prompt)
 
     print(f"gen prompt: {ret}")
@@ -221,7 +229,7 @@ def on_ui_settings():
     shared.opts.add_option(
         "prompt_generator_zh_model_id",
         shared.OptionInfo(
-            model_ids[0], "model type (requires reload UI)", gr.Radio,
+            model_ids[0], "model type", gr.Radio,
             lambda: {"choices": model_ids},
             section=SETTINGS_SECTION
         )
