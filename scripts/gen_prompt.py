@@ -7,6 +7,7 @@ import random
 from huggingface_hub import hf_hub_download
 import re
 from modules import scripts, script_callbacks, shared
+from scripts.translate_prompt import GoogleTranslate
 import torch
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -207,6 +208,12 @@ def init_model():
         model.init_model(model_id=model_id)
 
 
+def translate_prompt_one(prompt: str) -> str:
+
+    tp = GoogleTranslate()
+    return tp.translate(prompt, output_lang="en")
+
+
 def gen_prompt(*ui_prompts: list):
     global model
     init_model()
@@ -220,13 +227,13 @@ def gen_prompt(*ui_prompts: list):
             continue
 
         prompt = prompt.strip()
+        prompt = translate_prompt_one(prompt)
         result = model.gen_prompt(prompt)
         if result is None:
             result_list.append(prompt)
             print(f"gen prompt(empty): {prompt} --> {prompt}")
             continue
 
-        result = format_prompt_one(result)
         result_list.append(result)
 
         print(f"gen prompt: {prompt} --> {result}")

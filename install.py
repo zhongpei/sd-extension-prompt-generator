@@ -1,5 +1,10 @@
 import launch
+import os
 
-if not launch.is_installed("regex"):
-    print("Installing requirements for Prompt Formatter")
-    launch.run_pip("install regex", "support for variable lookbehind")
+req_file = os.path.join(os.path.dirname(os.path.realpath(__file__)), "requirements.txt")
+
+with open(req_file) as file:
+    for lib in file:
+        lib = lib.strip()
+        if not launch.is_installed(lib):
+            launch.run_pip(f"install {lib}", f"sd-webui-prompt-gen requirement: {lib}")
