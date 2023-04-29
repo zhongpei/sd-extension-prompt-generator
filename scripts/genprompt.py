@@ -5,15 +5,17 @@ from typing import List
 import gradio as gr
 import random
 from huggingface_hub import hf_hub_download
-
 import re
 from modules import scripts, script_callbacks, shared
+import torch
 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE_ID = 0 if torch.cuda.is_available() else -1
 ui_prompts = []
 
 MODEL_NAME = {
     "normal": 'FredZhang7/distilgpt2-stable-diffusion-v2',
-    "2D": 'FredZhang7/anime-anything-promptgen-v2',
+    "anime": 'FredZhang7/anime-anything-promptgen-v2',
 }
 model = None
 
@@ -58,6 +60,8 @@ class Model(object):
         self.cache = {}
         self.model_name = None
         self.model_id = None
+        self.last_result = None
+        self.last_prompt = None
 
     def local_dir(self, model_name):
         local_model_dir = model_name.split("/")[-1]
@@ -88,6 +92,8 @@ class Model(object):
         self.cache = {}
         self.model_name = None
         self.model_id = None
+        self.last_result = None
+        self.last_prompt = None
 
     def __add_cache(self, prompt, gen_prompts):
         prompt = prompt.strip()
@@ -105,7 +111,9 @@ class Model(object):
         if gen_prompts is not None and len(gen_prompts) > 0:
             return gen_prompts.pop()
 
-    def init_model(self, model_id="2D"):
+    def init_model(self, model_id="anime"):
+        self.reset_model()
+
         model_name = MODEL_NAME.get(model_id)
         self.model_name = model_name
         self.download_model(model_name)
@@ -120,9 +128,7 @@ class Model(object):
 
         tokenizer = GPT2Tokenizer.from_pretrained(self.local_dir('distilgpt2'), local_files_only=True)
         tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-        model = GPT2LMHeadModel.from_pretrained(self.local_dir(model_name), local_files_only=True)
-
-        self.reset_model()
+        model = GPT2LMHeadModel.from_pretrained(self.local_dir(model_name), local_files_only=True).to(DEVICE)
 
         self.model = model
         self.tokenizer = tokenizer
@@ -132,14 +138,21 @@ class Model(object):
         if p is not None:
             return p
 
+        if self.last_result == prompt and self.last_prompt is not None:
+            p = self.__get_cache(self.last_prompt)
+            if p is not None:
+                return p
+
         prompts = self.gen_prompts(prompt=prompt)
         if len(prompts) == 0:
             return prompt
 
-        p = prompts.pop()
+        result = prompts.pop()
+        self.last_prompt = prompt
+        self.last_result = result
         if len(prompts) > 0:
             self.__add_cache(prompt=prompt, gen_prompts=prompts)
-        return p
+        return result
 
     def gen_prompts(self, prompt: str) -> List[str]:
         temperature = 0.9  # a higher temperature will produce more diverse results, but with a higher risk of less coherent text
@@ -149,7 +162,7 @@ class Model(object):
         num_return_sequences = 5  # the number of results to generate
 
         # generate the result with contrastive search
-        input_ids = self.tokenizer(prompt, return_tensors='pt').input_ids
+        input_ids = self.tokenizer(prompt, return_tensors='pt').input_ids.to(DEVICE)
         output = self.model.generate(
             input_ids,
             do_sample=True,
@@ -160,17 +173,17 @@ class Model(object):
             repetition_penalty=repitition_penalty,
             penalty_alpha=0.6,
             no_repeat_ngram_size=1,
-            early_stopping=True
+            early_stopping=True,
         )
 
         prompt_output = []
         for i in range(len(output)):
-            p = self.tokenizer.decode(output[i], skip_special_tokens=True)
+            p = self.tokenizer.decode(output[i], skip_special_tokens=True, device=DEVICE_ID)
             prompt_output.append(p)
 
         prompt_output = list(set(prompt_output))
 
-        if self.model_id == "2D":
+        if self.model_id == "anime":
             prompt_output = [clean_tags(p) for p in prompt_output]
 
         print('\nInput:\n' + 100 * '-')
@@ -189,26 +202,44 @@ def init_model():
         model = Model()
         model.init_model(model_id=model_id)
     elif model.model_id != model_id:
+        print(f"reinit model {model.model_id} ==> {model_id}")
         model.reset_model()
         model.init_model(model_id=model_id)
 
 
-def gen_prompt(prompt):
+def gen_prompt(*ui_prompts: list):
     global model
     init_model()
+    result_list = []
 
-    if not prompt or len(prompt.strip()) == 0:
-        return prompt
-    prompt = prompt.strip()
-    ret = model.gen_prompt(prompt)
+    for prompt in ui_prompts:
 
-    print(f"gen prompt: {ret}")
-    return ret
+        if not prompt or len(prompt.strip()) == 0:
+            result_list.append(prompt)
+            print(f"gen prompt(empty): {prompt} --> {prompt}")
+            continue
+
+        prompt = prompt.strip()
+        result = model.gen_prompt(prompt)
+        if result is None:
+            result_list.append(prompt)
+            print(f"gen prompt(empty): {prompt} --> {prompt}")
+            continue
+
+        result = format_prompt_one(result)
+        result_list.append(result)
+
+        print(f"gen prompt: {prompt} --> {result}")
+    print(f"len ui_prompts: {len(ui_prompts)}  : {len(result_list)}")
+    if len(ui_prompts) == 1:
+        return result_list[0]
+    return result_list
 
 
 def on_before_component(component: gr.component, **kwargs: dict):
     if 'elem_id' in kwargs:
-        if kwargs['elem_id'] in ['txt2img_prompt', 'img2img_prompt', ]:
+        # print(f"elem_id: {kwargs['elem_id']}")
+        if kwargs['elem_id'] in ['txt2img_prompt', 'img2img_prompt']:
             ui_prompts.append(component)
         elif kwargs['elem_id'] == 'paste':
             with gr.Blocks(analytics_enabled=False) as ui_component:
@@ -241,7 +272,7 @@ script_callbacks.on_before_component(on_before_component)
 
 if __name__ == "__main__":
     m = Model()
-    m.download_model(MODEL_NAME.get("2D"))
+    m.download_model(MODEL_NAME.get("anime"))
     m.init_model()
     output = m.gen_prompt("1 girl")
     print(output)
